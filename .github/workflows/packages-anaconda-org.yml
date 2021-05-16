@@ -1,0 +1,33 @@
+name: Fetch anaconda.org stats
+on:
+  schedule:
+  - cron: '0 8,16 * * *'
+  pull_request:
+
+jobs:
+  fetch-anaconda-org-stats:
+    name: Fetch anaconda.org stats
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Fetch
+      id: fetch
+      run: |
+        pip install aiohttp ntplib requests urllib3
+        time=$( PYTHONPATH="$( pwd )/src" python -m get_package_stats.get_stats_from_anaconda_org )
+        echo "::set-output name=time::${time}"
+
+    - name: Add changes, commit
+      run: |
+        git config user.name github-actions
+        git config user.email github-actions@github.com
+        git add -A ./package-downloads
+        git status
+        git commit -m 'Update package download stats, ${{ steps.fetch.outputs.time }}'
+
+    - if: ${{ github.ref == 'refs/heads/main' }}
+      name: Push changes
+      run: |
+        git push
