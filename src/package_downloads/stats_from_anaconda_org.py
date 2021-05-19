@@ -185,10 +185,10 @@ async def save_channel_stats(
 
 async def main() -> None:
     channels = CHANNELS
-    channel_package_names = {"bioconda":["snakemake","bwa"]}
-        #channel_name: await retrieve_package_names(channel_url)
-        #for channel_name, channel_url in channels.items()
-    #}
+    channel_package_names = {
+        channel_name: await retrieve_package_names(channel_url)
+        for channel_name, channel_url in channels.items()
+    }
     async with Session() as session:
         for channel_name, package_names in channel_package_names.items():
             await save_channel_stats(session, channel_name, package_names)
