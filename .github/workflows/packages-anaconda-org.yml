@@ -17,7 +17,7 @@ jobs:
       id: fetch
       run: |
         pip install aiohttp ntplib requests urllib3
-        time=$( PYTHONPATH="$( pwd )/src" python -m get_package_stats.get_stats_from_anaconda_org )
+        time=$( PYTHONPATH="$( pwd )/src" python -m package_downloads.stats_from_anaconda_org )
         echo "::set-output name=time::${time}"
 
     - name: Add changes, commit
