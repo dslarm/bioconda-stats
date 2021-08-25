@@ -11,7 +11,9 @@ from logging import INFO, basicConfig, getLogger
 from pathlib import Path
 from sys import maxsize
 from types import TracebackType
-from typing import Any, Callable, Dict, ItemsView, List, Optional, Tuple, Type, Union
+from typing import (
+    Any, Callable, Dict, ItemsView, List, Optional, OrderedDict as ODict, Tuple, Type, Union
+)
 
 from aiohttp import ClientSession, ClientTimeout
 
@@ -178,7 +180,7 @@ def split_off_level_counts(
 
 def sort_by_date_and_counts(
     counts_per_date: Dict[str, Dict[str, int]]
-) -> OrderedDict[str, OrderedDict[str, int]]:
+) -> ODict[str, ODict[str, int]]:
     return OrderedDict(
         sorted(
             (
@@ -200,7 +202,7 @@ def sort_by_date_and_counts(
 
 def get_sub_counts_per_date(
     all_sub_counts_per_date: Dict[str, Dict[str, int]],
-) -> OrderedDict[str, OrderedDict[str, int]]:
+) -> ODict[str, ODict[str, int]]:
     counts_per_date: Dict[str, Dict[str, int]] = defaultdict(dict)
     for sub_key, sub_counts_per_date in all_sub_counts_per_date.items():
         for date, total in sub_counts_per_date.items():
@@ -212,8 +214,8 @@ def get_recent_counts(
     session_date: str,
     max_sub_level_entries: int,
     max_days: int,
-    counts_per_date: OrderedDict[str, OrderedDict[str, int]],
-) -> OrderedDict[str, OrderedDict[str, int]]:
+    counts_per_date: ODict[str, ODict[str, int]],
+) -> ODict[str, ODict[str, int]]:
     recent_counts_per_date: Dict[str, Dict[str, int]] = defaultdict(dict)
     recent_total_counts: Dict[str, int] = {}
     min_date = parse_date(session_date) - timedelta(days=max_days)
@@ -244,7 +246,7 @@ def get_recent_counts(
 
 def get_summed_up_counts_per_date(
     session_date: str,
-    ordered_counts_per_date: OrderedDict[str, OrderedDict[str, int]],
+    ordered_counts_per_date: ODict[str, ODict[str, int]],
 ) -> Dict[str, int]:
     tmp: Dict[str, int] = ordered_counts_per_date[session_date].copy()
     summed_up_total = sum(tmp.values())
