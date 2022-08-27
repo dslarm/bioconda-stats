@@ -27,7 +27,7 @@ async def clone_repodata_archive(repodata_archive: Path, channel_url: str) -> No
         ".",
     )
     git("sparse-checkout", "init")
-    git("sparse-checkout", "set", f"repodata/{escape_path(channel_url)}/*/repodata.json")
+    git("sparse-checkout", "set", "--no-cone", f"repodata/{escape_path(channel_url)}/*/repodata.json")
     git("checkout", "--quiet")
 
 
