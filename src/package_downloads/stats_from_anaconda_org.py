@@ -10,15 +10,12 @@ from json import dumps, loads
 from logging import INFO, basicConfig, getLogger
 from pathlib import Path
 from sys import maxsize
-from types import TracebackType
-from typing import (
-    Any, Callable, Dict, ItemsView, List, Optional, OrderedDict as ODict, Tuple, Type, Union
-)
+from typing import Any, Dict, List, OrderedDict as ODict, Tuple
 
-from aiohttp import ClientSession, ClientTimeout
+from aiohttp import ClientSession
 
 from .common import BASE_DIR, CHANNELS, DATE_FORMAT
-from .ntp_time import get_ntp_time
+from .download import Session, get_and_parse
 from .package_names import retrieve_package_names
 
 
@@ -33,38 +30,18 @@ PACKAGE_API_URL_TEMPLATE = "https://api.anaconda.org/package/{channel}/{package}
 log = getLogger(__name__).info
 
 
-class Session:
-    def __init__(self) -> None:
-        self.client_session = ClientSession(timeout=ClientTimeout(total=15 * 60))
-        self.date = get_ntp_time()
-
-    async def __aenter__(self) -> "Session":
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
-    ) -> None:
-        await self.client_session.close()
-
-
-async def get_and_parse(
-    client_session: ClientSession, url: str, headers: Dict[str, str]
-) -> Any:
-    async with client_session.get(url, headers=headers) as response:
-        response.raise_for_status()
-        res = await response.text()
-    return loads(res)
-
-
 async def get_package_info(
     client_session: ClientSession, channel: str, package_name: str
 ) -> Dict[str, Any]:
     url = PACKAGE_API_URL_TEMPLATE.format(channel=channel, package=package_name)
     headers = HTTP_HEADERS
-    info: Dict[str, Any] = await get_and_parse(client_session, url, headers)
+    info: Dict[str, Any] = await get_and_parse(
+        client_session,
+        url,
+        headers,
+        retries=5,
+        retry_delay=0.5,
+    )
     return info
 
 
@@ -342,11 +319,11 @@ async def save_channel_stats(
 
 async def main() -> str:
     channels = CHANNELS
-    channel_package_names = {
-        channel_name: (await retrieve_package_names(channel_url))
-        for channel_name, channel_url in channels.items()
-    }
     async with Session() as session:
+        channel_package_names = {
+            channel_name: (await retrieve_package_names(session.client_session, channel_url))
+            for channel_name, channel_url in channels.items()
+        }
         for channel_name, package_names in channel_package_names.items():
             await save_channel_stats(session, channel_name, package_names)
         return session.date
