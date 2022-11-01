@@ -10,7 +10,7 @@ from json import dumps, loads
 from logging import INFO, basicConfig, getLogger
 from pathlib import Path
 from sys import maxsize
-from typing import Any, Dict, List, OrderedDict as ODict, Tuple
+from typing import Any, Dict, Iterable, List, OrderedDict as ODict, Tuple
 
 from aiohttp import ClientSession
 
@@ -28,6 +28,12 @@ HTTP_HEADERS = {
 PACKAGE_API_URL_TEMPLATE = "https://api.anaconda.org/package/{channel}/{package}"
 
 log = getLogger(__name__).info
+
+
+def chunked_lists(iterable: Iterable[Any], size: int) -> Iterable[List[Any]]:
+    it = iter(iterable)
+    while chunk := list(islice(it, size)):
+        yield chunk
 
 
 async def get_package_info(
@@ -296,19 +302,21 @@ async def save_package_stats(
     return level_counts_per_date
 
 
-async def save_channel_stats(
-    session: Session, channel_name: str, package_names: List[str]
-) -> None:
+async def save_channel_stats(date: str, channel_name: str, package_names: List[str]) -> None:
     max_sub_level_entries = 50
     max_days = 62
     all_package_counts_per_date: Dict[Tuple[str, ...], Dict[str, Any]] = {}
-    for package_counts_per_date in await gather(
-        *map(
-            partial(save_package_stats, session, max_sub_level_entries, max_days, channel_name),
-            package_names,
-        )
-    ):
-        all_package_counts_per_date.update(package_counts_per_date)
+    for package_names_chunk in chunked_lists(package_names, 500):
+        async with Session(date=date) as session:
+            save_stats = partial(
+                save_package_stats,
+                session,
+                max_sub_level_entries,
+                max_days,
+                channel_name,
+            )
+            for package_counts_per_date in await gather(*map(save_stats, package_names_chunk)):
+                all_package_counts_per_date.update(package_counts_per_date)
     await update_counts(
         session.date,
         max_sub_level_entries,
@@ -324,9 +332,10 @@ async def main() -> str:
             channel_name: (await retrieve_package_names(session.client_session, channel_url))
             for channel_name, channel_url in channels.items()
         }
-        for channel_name, package_names in channel_package_names.items():
-            await save_channel_stats(session, channel_name, package_names)
-        return session.date
+        date = session.date
+    for channel_name, package_names in channel_package_names.items():
+        await save_channel_stats(date, channel_name, package_names)
+    return session.date
 
 
 if __name__ == "__main__":

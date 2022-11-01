@@ -9,9 +9,9 @@ from .ntp_time import get_ntp_time
 
 
 class Session:
-    def __init__(self) -> None:
+    def __init__(self, date: Optional[str] = None) -> None:
         self.client_session = ClientSession(timeout=ClientTimeout(total=15 * 60))
-        self.date = get_ntp_time()
+        self.date = date if date is not None else get_ntp_time()
 
     async def __aenter__(self) -> "Session":
         return self
