@@ -18,12 +18,15 @@ jobs:
       run: |
         pip install aiohttp ntplib requests urllib3
         time="$( PYTHONPATH="$( pwd )/src" python -m package_downloads.ntp_time )"
-        set +e
-        if git --no-pager log -1 --oneline | grep -qF "${time}" ; then
-          echo "skip=1" >> "${GITHUB_OUTPUT}"
-        else
-          echo "skip=0" >> "${GITHUB_OUTPUT}"
-        fi
+        last_commit_message="$( git --no-pager log -1 --pretty=%s )"
+        set -x
+        case "${last_commit_message}" in
+          *"${time}" )
+            echo "skip=1" >> "${GITHUB_OUTPUT}"
+            ;;
+          * )
+            echo "skip=0" >> "${GITHUB_OUTPUT}"
+        esac
 
     - if: ${{ github.ref != 'refs/heads/main' || steps.check.outputs.skip == '0' }}
       name: Fetch
@@ -42,7 +45,7 @@ jobs:
         git status --short | grep -o ^. | sort | uniq -c
         git commit -qm 'Update package download stats, ${{ steps.fetch.outputs.time }}'
 
-    - if: ${{ github.ref == 'refs/heads/main' && steps.check.outputs.skip != '0' }}
+    - if: ${{ github.ref == 'refs/heads/main' && steps.check.outputs.skip == '0' }}
       name: Push changes
       run: |
         git push
