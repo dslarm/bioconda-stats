@@ -11,28 +11,38 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
-    - name: Fetch
+    - name: Check
+      id: check
+      run: |
+        pip install aiohttp ntplib requests urllib3
+        time="$( PYTHONPATH="$( pwd )/src" python -m package_downloads.ntp_time )"
+        set +e
+        if git --no-pager log -1 --oneline | grep -qF "${time}" ; then
+          echo "skip=1" >> "${GITHUB_OUTPUT}"
+        else
+          echo "skip=0" >> "${GITHUB_OUTPUT}"
+        fi
+
+    - if: ${{ github.ref != 'refs/heads/main' || steps.check.outputs.skip == '0' }}
+      name: Fetch
       id: fetch
       run: |
         pip install aiohttp ntplib requests urllib3
-        time=$( PYTHONPATH="$( pwd )/src" python -m package_downloads.stats_from_anaconda_org )
-        echo "::set-output name=time::${time}"
+        time="$( PYTHONPATH="$( pwd )/src" python -m package_downloads.stats_from_anaconda_org )"
+        echo "time=${time}" >> "${GITHUB_OUTPUT}"
 
-    - name: Add changes, commit
+    - if: ${{ github.ref != 'refs/heads/main' || steps.check.outputs.skip == '0' }}
+      name: Add changes, commit
       run: |
-        if git --no-pager log -1 --oneline | grep -q '${{ steps.fetch.outputs.time }}$' ; then
-          echo 'Skipping commit since daily stats already archived.'
-        else
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git add -A ./package-downloads
-          git status
-          git commit -m 'Update package download stats, ${{ steps.fetch.outputs.time }}'
-        fi
+        git config user.name github-actions
+        git config user.email github-actions@github.com
+        git add -A ./package-downloads
+        git status --short | grep -o ^. | sort | uniq -c
+        git commit -qm 'Update package download stats, ${{ steps.fetch.outputs.time }}'
 
-    - if: ${{ github.ref == 'refs/heads/main' }}
+    - if: ${{ github.ref == 'refs/heads/main' && steps.check.outputs.skip != '0' }}
       name: Push changes
       run: |
         git push
