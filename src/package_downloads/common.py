@@ -1,4 +1,4 @@
-from asyncio import Future, gather
+from asyncio import gather
 from typing import Any, Callable, Iterable, Sequence, TypeVar
 from urllib.parse import quote as urllib_quote, unquote as urllib_unquote
 
@@ -29,5 +29,5 @@ def unescape_path(path: str) -> str:
 T = TypeVar("T")
 
 
-async def gather_map(func: Callable[..., T], it: Iterable[Any]) -> Future[Sequence[T]]:
+async def gather_map(func: Callable[..., T], it: Iterable[Any]) -> Any:
     return await gather(*map(func, it))  # type: ignore
