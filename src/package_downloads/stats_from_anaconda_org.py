@@ -40,7 +40,7 @@ async def get_package_info(
         url,
         headers,
         retries=5,
-        retry_delay=0.5,
+        retry_delay=1,
     )
     return info
 
