@@ -1,5 +1,6 @@
+from asyncio import Future, gather
+from typing import Any, Callable, Iterable, Sequence, TypeVar
 from urllib.parse import quote as urllib_quote, unquote as urllib_unquote
-
 
 BASE_DIR = "package-downloads"
 DATE_FORMAT = "%Y-%m-%d"
@@ -23,3 +24,10 @@ def escape_path(path: str) -> str:
 
 def unescape_path(path: str) -> str:
     return urllib_unquote(path.replace("=", "%"))
+
+
+T = TypeVar("T")
+
+
+async def gather_map(func: Callable[..., T], it: Iterable[Any]) -> Future[Sequence[T]]:
+    return await gather(*map(func, it))  # type: ignore

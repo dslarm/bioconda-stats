@@ -1,12 +1,12 @@
 #! /usr/bin/env python
 
-from asyncio import gather, run
+from asyncio import run
 from functools import partial
 from typing import Any, Collection, Dict, List, Optional, Set
 
 from aiohttp import ClientSession
 
-from .common import CHANNELS, SUBDIRS, escape_path, unescape_path
+from .common import CHANNELS, SUBDIRS, escape_path, gather_map, unescape_path
 from .download import Session, get_and_parse
 
 
@@ -42,11 +42,8 @@ async def retrieve_package_names(
     subdirs: Collection[str] = SUBDIRS,
 ) -> List[str]:
     package_names: Set[str] = set()
-    for names in await gather(
-        *map(
-            partial(extract_package_names, client_session, channel_url),
-            subdirs,
-        )
+    for names in await gather_map(
+        partial(extract_package_names, client_session, channel_url), subdirs
     ):
         package_names.update(names)
     return sorted(package_names)

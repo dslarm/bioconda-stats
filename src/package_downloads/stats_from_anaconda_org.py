@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 
-from asyncio import gather, run
+from asyncio import run
 from collections import defaultdict, OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -10,11 +10,13 @@ from json import dumps, loads
 from logging import INFO, basicConfig, getLogger
 from pathlib import Path
 from sys import maxsize
+from time import sleep
 from typing import Any, Dict, Iterable, List, OrderedDict as ODict, Tuple
 
 from aiohttp import ClientSession
+from aiohttp.client_exceptions import ClientError, ClientResponseError
 
-from .common import BASE_DIR, CHANNELS, DATE_FORMAT
+from .common import BASE_DIR, CHANNELS, DATE_FORMAT, gather_map
 from .download import Session, get_and_parse
 from .package_names import retrieve_package_names
 
@@ -27,7 +29,8 @@ HTTP_HEADERS = {
 
 PACKAGE_API_URL_TEMPLATE = "https://api.anaconda.org/package/{channel}/{package}"
 
-log = getLogger(__name__).info
+logger = getLogger(__name__)
+log = logger.info
 
 
 def chunked_lists(iterable: Iterable[Any], size: int) -> Iterable[List[Any]]:
@@ -217,13 +220,13 @@ def get_recent_counts(
         recent_total_counts.keys(), key=lambda key: recent_total_counts[key]
     )[-max_sub_level_entries:]
     selected_recent_counts_per_date = {}
-    for date, key_totals in recent_counts_per_date.items():
+    for date_, key_totals_ in recent_counts_per_date.items():
         counts_at_date = {}
-        for key, total in key_totals.items():
+        for key, total in key_totals_.items():
             if key in recent_selection:
                 counts_at_date[key] = total
         if counts_at_date:
-            selected_recent_counts_per_date[date] = counts_at_date
+            selected_recent_counts_per_date[date_] = counts_at_date
     return sort_by_date_and_counts(selected_recent_counts_per_date)
 
 
@@ -282,15 +285,11 @@ async def update_counts(
 
 
 async def save_package_stats(
-    session: Session,
+    session_date: str,
     max_sub_level_entries: int,
     max_days: int,
-    channel: str,
-    package_name: str,
+    current_basename_totals: Dict[Tuple[str, ...], int],
 ) -> Dict[Tuple[str, ...], Dict[str, Any]]:
-    current_basename_totals = await get_package_download_counts(session, channel, package_name)
-    log("update_basename_counts: %s::%s", channel, package_name)
-    session_date = session.date
     basename_counts_per_date = await update_basename_counts(
         session_date, current_basename_totals
     )
@@ -302,23 +301,47 @@ async def save_package_stats(
     return level_counts_per_date
 
 
-async def save_channel_stats(date: str, channel_name: str, package_names: List[str]) -> None:
+async def save_channel_stats(
+    session_date: str, channel_name: str, package_names: List[str]
+) -> None:
     max_sub_level_entries = 50
     max_days = 62
+    retries_per_chunk = 5
+    retry_delay = 30
+    chunk_size = 100
+    fetch_count = 0
     all_package_counts_per_date: Dict[Tuple[str, ...], Dict[str, Any]] = {}
-    for package_names_chunk in chunked_lists(package_names, 500):
-        async with Session(date=date) as session:
-            save_stats = partial(
-                save_package_stats,
-                session,
-                max_sub_level_entries,
-                max_days,
-                channel_name,
-            )
-            for package_counts_per_date in await gather(*map(save_stats, package_names_chunk)):
-                all_package_counts_per_date.update(package_counts_per_date)
+    for chunk_package_names in chunked_lists(package_names, chunk_size):
+        current_retry = 0
+        while True:
+            try:
+                async with Session(date=session_date) as session:
+                    chunk_current_basename_totals = await gather_map(
+                        partial(get_package_download_counts, session, channel_name),
+                        chunk_package_names,
+                    )
+            except ClientError:
+                if current_retry > retries_per_chunk:
+                    raise
+                current_retry += 1
+                logger.exception(
+                    "Got a ClientError; "
+                    f"Delaying further exeuction by {retry_delay}s (retry: {current_retry})..."
+                )
+                # This is time.sleep not asyncio.sleep, i.e., we halt everything.
+                sleep(retry_delay)
+            else:
+                break
+
+        fetch_count += len(chunk_package_names)
+        log("save_package_stats: %s: %d of %d", channel_name, fetch_count, len(package_names))
+        for package_counts_per_date in await gather_map(
+            partial(save_package_stats, session_date, max_sub_level_entries, max_days),
+            chunk_current_basename_totals,
+        ):
+            all_package_counts_per_date.update(package_counts_per_date)
     await update_counts(
-        session.date,
+        session_date,
         max_sub_level_entries,
         max_days,
         all_package_counts_per_date,
@@ -332,10 +355,10 @@ async def main() -> str:
             channel_name: (await retrieve_package_names(session.client_session, channel_url))
             for channel_name, channel_url in channels.items()
         }
-        date = session.date
+        session_date = session.date
     for channel_name, package_names in channel_package_names.items():
-        await save_channel_stats(date, channel_name, package_names)
-    return session.date
+        await save_channel_stats(session_date, channel_name, package_names)
+    return session_date
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-from time import sleep
+from asyncio import sleep
 from types import TracebackType
 from typing import Any, Dict, Optional, Type
 
@@ -40,8 +40,7 @@ async def get_and_parse(
                 retries -= 1
                 if retries < 0:
                     raise
-                # NOTE: This is now time.sleep, i.e., it delays all operations.
-                sleep(retry_delay)
+                await sleep(retry_delay)
             else:
                 break
         res = await response.json()
