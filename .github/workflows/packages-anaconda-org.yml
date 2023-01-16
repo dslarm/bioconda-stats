@@ -16,9 +16,14 @@ jobs:
     - name: Check
       id: check
       run: |
-        pip install aiohttp ntplib requests urllib3
-        time="$( PYTHONPATH="$( pwd )/src" python -m package_downloads.ntp_time )"
-        last_commit_message="$( git --no-pager log -1 --pretty=%s )"
+        pip install \
+          ntplib
+        time="$(
+          export PYTHONPATH="$( pwd )/src"
+          python -m package_downloads.ntp_time
+        )"
+        git fetch --depth=1 origin data:data
+        last_commit_message="$( git --no-pager log -1 --pretty=%s data )"
         set -x
         case "${last_commit_message}" in
           *"${time}" )
@@ -32,8 +37,16 @@ jobs:
       name: Fetch
       id: fetch
       run: |
-        pip install aiohttp ntplib requests urllib3
-        time="$( PYTHONPATH="$( pwd )/src" python -m package_downloads.stats_from_anaconda_org )"
+        pip install \
+          ntplib \
+          aiohttp requests urllib3 \
+          pandas
+        time="$(
+          export PYTHONPATH="$( pwd )/src"
+          mkdir tmp
+          cd tmp
+          python -m package_downloads.stats_from_anaconda_org
+        )"
         echo "time=${time}" >> "${GITHUB_OUTPUT}"
 
     - if: ${{ github.ref != 'refs/heads/main' || steps.check.outputs.skip == '0' }}
@@ -41,11 +54,16 @@ jobs:
       run: |
         git config user.name github-actions
         git config user.email github-actions@github.com
+        git checkout data
+        rm -rf package-downloads
+        mv tmp/package-downloads ./
+        rmdir tmp
         git add -A ./package-downloads
         git status --short | grep -o ^. | sort | uniq -c
         git commit -qm 'Update package download stats, ${{ steps.fetch.outputs.time }}'
+        git tag '${{ steps.fetch.outputs.time }}'
 
     - if: ${{ github.ref == 'refs/heads/main' && steps.check.outputs.skip == '0' }}
       name: Push changes
       run: |
-        git push
+        git push --tags origin data:data
