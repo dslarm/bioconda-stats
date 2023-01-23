@@ -7,6 +7,7 @@ from logging import INFO, basicConfig, getLogger
 from pathlib import Path
 from time import sleep
 from typing import Any, Dict, Iterable, List, Tuple
+import re
 
 from aiohttp import ClientSession
 from aiohttp.client_exceptions import ClientError
@@ -23,6 +24,7 @@ HTTP_HEADERS = {
     "Accept": "application/json",
 }
 PACKAGE_API_URL_TEMPLATE = "https://api.anaconda.org/package/{channel}/{package}"
+PACKAGE_EXTENSION_RE = re.compile("\.tar\.bz2$|\.conda$")
 
 logger = getLogger(__name__)
 log = logger.info
@@ -67,7 +69,8 @@ async def fetch_package_download_counts(
                 "package": package,
                 "version": package_file_info["version"],
                 "subdir": package_file_info["attrs"]["subdir"],
-                "basename": package_file_info["basename"].rsplit("/", 1)[-1],
+                "build": package_file_info["attrs"]["build"],
+                "extension": PACKAGE_EXTENSION_RE.search(package_file_info["basename"])[0],
                 "total": max(0, package_file_info["ndownloads"]),
             }
         )
@@ -79,9 +82,11 @@ async def fetch_package_download_counts(
                 e["channel"],
                 e["package"],
                 VersionOrder(e["version"]),
+                # VersionOrder can be ambiguous (e.g., "1.1" == "1.01"), so compare by str, too.
+                e["version"],
                 e["subdir"],
-                e["basename"],
-                e["total"],
+                e["build"],
+                e["extension"],
             ),
         )
     )
@@ -117,7 +122,7 @@ async def save_counts(counts: Tuple[Tuple[str, ...], pd.DataFrame]) -> None:
     index, totals = counts
     path = Path(BASE_DIR).joinpath(*index[:-1], index[-1] + ".tsv")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(totals.to_csv(sep="\t", lineterminator="\r\n", index=False))
+    path.write_text(totals.to_csv(sep="\t", lineterminator="\n", index=False))
 
 
 async def save_channel_stats(
@@ -166,7 +171,7 @@ async def main() -> str:
     totals.insert(0, "date", date)
     for index, entry in totals.groupby(totals.index.names[0]):
         path = Path(BASE_DIR).joinpath(index + ".tsv")
-        path.write_text(entry.to_csv(sep="\t", lineterminator="\r\n", index=False))
+        path.write_text(entry.to_csv(sep="\t", lineterminator="\n", index=False))
     return date
 
 
