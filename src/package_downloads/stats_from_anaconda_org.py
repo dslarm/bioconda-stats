@@ -1,12 +1,13 @@
 #! /usr/bin/env python
 
 from asyncio import run
+from collections import defaultdict
 from functools import partial
 from itertools import islice
 from logging import INFO, basicConfig, getLogger
 from pathlib import Path
 from time import sleep
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List
 import re
 
 from aiohttp import ClientSession
@@ -64,40 +65,35 @@ async def fetch_package_download_counts(
             continue
         downloads.append(
             {
-                "top": TOP_DIR,
-                "channel": channel,
                 "package": package,
                 "version": package_file_info["version"],
                 "subdir": package_file_info["attrs"]["subdir"],
-                "build": package_file_info["attrs"]["build"],
-                "extension": PACKAGE_EXTENSION_RE.search(package_file_info["basename"])[0],
+                # "build": package_file_info["attrs"]["build"],
+                # "extension": PACKAGE_EXTENSION_RE.search(package_file_info["basename"])[0],
                 "total": max(0, package_file_info["ndownloads"]),
             }
         )
-    df = pd.DataFrame(
+    return pd.DataFrame(
         sorted(
             downloads,
             key=lambda e: (
-                e["top"],
-                e["channel"],
                 e["package"],
                 VersionOrder(e["version"]),
                 # VersionOrder can be ambiguous (e.g., "1.1" == "1.01"), so compare by str, too.
                 e["version"],
                 e["subdir"],
-                e["build"],
-                e["extension"],
+                # e["build"],
+                # e["extension"],
             ),
         )
     )
-    return df.set_index(df.loc[:, :"package"].columns.tolist())
 
 
 async def get_batch_package_download_counts(
     date: str, channel_name: str, package_names: List[str]
 ) -> Iterable[pd.DataFrame]:
-    retries_per_chunk = 5
-    retry_delay = 15
+    retries_per_chunk = 2
+    retry_delay = 60
     retry = 0
     while True:
         try:
@@ -118,42 +114,66 @@ async def get_batch_package_download_counts(
             sleep(retry_delay)
 
 
-async def save_counts(counts: Tuple[Tuple[str, ...], pd.DataFrame]) -> None:
-    index, totals = counts
-    path = Path(BASE_DIR).joinpath(*index[:-1], index[-1] + ".tsv")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(totals.to_csv(sep="\t", lineterminator="\n", index=False))
-
-
-async def save_channel_stats(
+async def get_channel_stats(
     date: str, channel_name: str, package_names: List[str]
 ) -> pd.DataFrame:
-    fetch_count = 0
-    totals_list: List[pd.DataFrame] = []
     chunk_size = 500
+    fetch_count = 0
+    stats_list: List[pd.DataFrame] = []
     for chunk_package_names in chunked_lists(package_names, chunk_size):
-        chunk_totals = pd.concat(
+        stats_list.extend(
             await get_batch_package_download_counts(date, channel_name, chunk_package_names)
         )
-
         fetch_count += len(chunk_package_names)
-        log("save_counts: %s: %d of %d", channel_name, fetch_count, len(package_names))
+        log("get_channel_stats: %s: %d of %d", channel_name, fetch_count, len(package_names))
+    return pd.concat(stats_list)
 
-        grouped = chunk_totals.groupby(chunk_totals.index.names)
-        await gather_map(save_counts, grouped)
 
-        totals_list.append(grouped.sum("total"))
-    totals = pd.concat(totals_list)
-    while True:
-        names = totals.index.droplevel(-1).names
-        totals.reset_index(inplace=True)
-        totals.set_index(names, inplace=True)
-        grouped = totals.groupby(totals.index.names)
-        if len(totals.index.names) > 1:
-            await gather_map(save_counts, grouped)
-            totals = grouped.sum("total")
-            continue
-        return totals
+def read_tsv(path: Path, **kwargs: Any) -> pd.DataFrame:
+    return pd.read_csv(path, sep="\t", dtype=defaultdict(lambda: str, total=int))
+
+
+def write_tsv(path: Path, data_frame: pd.DataFrame) -> None:
+    data_frame.to_csv(path, sep="\t", lineterminator="\n", index=True)
+
+
+async def save_packages_stats(channel_dir: Path, totals: pd.DataFrame) -> None:
+    log("save_packages_stats: %s", channel_dir.name)
+    packages_totals = totals.groupby("package", sort=True)
+    write_tsv(channel_dir / "packages.tsv", packages_totals.sum("total"))
+
+    versions_dir = channel_dir / "versions"
+    versions_dir.mkdir(parents=True, exist_ok=True)
+    for package, package_totals in packages_totals:
+        version_totals = package_totals.groupby("version", sort=False)
+        write_tsv(versions_dir / f"{package}.tsv", version_totals.sum("total"))
+
+
+async def save_historic_channel_stats(
+    date: str, channel_dir: Path, totals: pd.DataFrame
+) -> None:
+    channel_totals = pd.DataFrame([{"date": date, "total": totals["total"].sum()}])
+    channel_tsv = channel_dir / "channel.tsv"
+    if channel_tsv.exists():
+        channel_totals = pd.concat([read_tsv(channel_tsv), channel_totals])
+    channel_totals.set_index("date", inplace=True)
+    write_tsv(channel_tsv, channel_totals)
+
+
+async def save_channel_stats(date: str, channel_name: str, package_names: List[str]) -> None:
+    totals = await get_channel_stats(date, channel_name, package_names)
+
+    log("save_channel_stats: %s: entries %d", channel_name, len(totals))
+
+    channel_dir = Path(BASE_DIR) / TOP_DIR / channel_name
+    channel_dir.mkdir(parents=True, exist_ok=True)
+
+    await save_historic_channel_stats(date, channel_dir, totals)
+
+    subdirs_totals = totals.groupby("subdir", sort=True)
+    write_tsv(channel_dir / "subdirs.tsv", subdirs_totals.sum("total"))
+
+    await save_packages_stats(channel_dir, totals)
 
 
 async def main() -> str:
@@ -164,14 +184,8 @@ async def main() -> str:
             for channel_name, channel_url in channels.items()
         }
         date = session.date
-    totals = pd.DataFrame()
     for channel_name, package_names in channel_package_names.items():
-        channel_totals = await save_channel_stats(date, channel_name, package_names)
-        totals = pd.concat((totals, channel_totals))
-    totals.insert(0, "date", date)
-    for index, entry in totals.groupby(totals.index.names[0]):
-        path = Path(BASE_DIR).joinpath(index + ".tsv")
-        path.write_text(entry.to_csv(sep="\t", lineterminator="\n", index=False))
+        await save_channel_stats(date, channel_name, package_names)
     return date
 
 

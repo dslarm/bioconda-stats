@@ -22,29 +22,28 @@ jobs:
           export PYTHONPATH="$( pwd )/src"
           python -m package_downloads.ntp_time
         )"
-        git fetch --depth=1 origin data:data
-        last_commit_message="$( git --no-pager log -1 --pretty=%s data )"
-        set -x
-        case "${last_commit_message}" in
-          *"${time}" )
+
+        if git ls-remote --exit-code --quiet --tags -- origin "${time}" ; then
             echo "skip=1" >> "${GITHUB_OUTPUT}"
-            ;;
-          * )
+        else
             echo "skip=0" >> "${GITHUB_OUTPUT}"
-        esac
+        fi
 
     - if: ${{ github.ref != 'refs/heads/main' || steps.check.outputs.skip == '0' }}
       name: Fetch
       id: fetch
       run: |
+        set -x
+        ref="$( git show-ref --head --hash HEAD )"
         pip install \
           ntplib \
           aiohttp requests urllib3 \
           pandas
+        git fetch --depth=1 origin data:data
+        git checkout --quiet data
+        git checkout --quiet "${ref}" -- ./src
         time="$(
           export PYTHONPATH="$( pwd )/src"
-          mkdir tmp
-          cd tmp
           python -m package_downloads.stats_from_anaconda_org
         )"
         echo "time=${time}" >> "${GITHUB_OUTPUT}"
@@ -52,13 +51,11 @@ jobs:
     - if: ${{ github.ref != 'refs/heads/main' || steps.check.outputs.skip == '0' }}
       name: Add changes, commit
       run: |
+        set -x
         git config user.name github-actions
         git config user.email github-actions@github.com
-        git checkout data
-        rm -rf package-downloads
-        mv tmp/package-downloads ./
-        rmdir tmp
         git add -A ./package-downloads
+        git rm -rf ./src
         git status --short | grep -o ^. | sort | uniq -c
         git commit -qm 'Update package download stats, ${{ steps.fetch.outputs.time }}'
         git tag '${{ steps.fetch.outputs.time }}'
