@@ -46,7 +46,7 @@ async def fetch_package_info(
         client_session,
         url,
         headers,
-        retries=5,
+        retries=2,
         retry_delay=1,
     )
     return info
@@ -117,15 +117,20 @@ async def get_batch_package_download_counts(
 async def get_channel_stats(
     date: str, channel_name: str, package_names: List[str]
 ) -> pd.DataFrame:
-    chunk_size = 500
+    chunk_size = 50
+    inter_chunk_delay = 0.5
     fetch_count = 0
     stats_list: List[pd.DataFrame] = []
     for chunk_package_names in chunked_lists(package_names, chunk_size):
         stats_list.extend(
             await get_batch_package_download_counts(date, channel_name, chunk_package_names)
         )
-        fetch_count += len(chunk_package_names)
+        current_chunk_size = len(chunk_package_names)
+        fetch_count += current_chunk_size
         log("get_channel_stats: %s: %d of %d", channel_name, fetch_count, len(package_names))
+        if current_chunk_size == chunk_size:
+            # This is time.sleep, not asyncio.sleep, i.e., we halt everything.
+            sleep(inter_chunk_delay)
     return pd.concat(stats_list)
 
 
