@@ -197,7 +197,7 @@ async def main() -> str:
         }
         date = session.date
     for channel_name, package_names in channel_package_names.items():
-        await save_channel_stats(date, channel_name, package_names[1:100])
+        await save_channel_stats(date, channel_name, package_names)
     return date
 
 
