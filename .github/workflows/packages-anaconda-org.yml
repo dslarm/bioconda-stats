@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Check
       id: check
@@ -34,7 +34,7 @@ jobs:
       id: fetch
       run: |
         set -x
-        ref="$( git show-ref --head --hash HEAD )"
+        ref="$( git show-ref --head --hash main/HEAD )"
         pip install \
           ntplib \
           aiohttp requests urllib3 \
