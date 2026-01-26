@@ -145,7 +145,7 @@ def write_tsv(path: Path, data_frame: pd.DataFrame) -> None:
 async def save_packages_stats(channel_dir: Path, totals: pd.DataFrame) -> None:
     log("save_packages_stats: %s", channel_dir.name)
     packages_totals = totals.groupby("package", sort=True)
-    write_tsv(channel_dir / "packages.tsv", packages_totals.sum("total"))
+    write_tsv(channel_dir / "packages.tsv", packages_totals["total"].sum())
 
     versions_dir = channel_dir / "versions"
     versions_dir.mkdir(parents=True, exist_ok=True)
@@ -153,9 +153,9 @@ async def save_packages_stats(channel_dir: Path, totals: pd.DataFrame) -> None:
     platforms_dir.mkdir(parents=True, exist_ok=True)
     for package, package_totals in packages_totals:
         version_totals = package_totals.groupby(["version"], sort=False)
-        write_tsv(versions_dir / f"{package}.tsv", version_totals.sum("total"))
+        write_tsv(versions_dir / f"{package}.tsv", version_totals["total"].sum())
         subdir_totals = package_totals.groupby(["subdir"], sort=False)
-        write_tsv(platforms_dir / f"{package}.tsv", subdir_totals.sum("total"))
+        write_tsv(platforms_dir / f"{package}.tsv", subdir_totals["total"].sum())
 
 
 async def save_historic_channel_stats(
@@ -183,7 +183,7 @@ async def save_channel_stats(date: str, channel_name: str, package_names: List[s
     await save_historic_channel_stats(date, channel_dir, totals)
 
     subdirs_totals = totals.groupby("subdir", sort=True)
-    write_tsv(channel_dir / "subdirs.tsv", subdirs_totals.sum("total"))
+    write_tsv(channel_dir / "subdirs.tsv", subdirs_totals["total"].sum())
 
     await save_packages_stats(channel_dir, totals)
 
