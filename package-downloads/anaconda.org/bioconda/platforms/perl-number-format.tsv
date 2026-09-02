@@ -1,4 +1,4 @@
 subdir	total
-linux-64	65521
-noarch	120073
+linux-64	65536
+noarch	120141
 osx-64	5194
